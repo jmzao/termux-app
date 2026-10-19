@@ -1,1 +1,99 @@
-name: Build Termux-ZRAM ARM64\n\non:\n  push:\n    branches: [zram-runtime]\n  workflow_dispatch:\n\npermissions:\n  contents: read\n\njobs:\n  build:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 120\n    env:\n      APP_ID: com.termuxzram\n      TERMUX_PACKAGE_VARIANT: apt-android-7\n      TERMUX_PACKAGES_BRANCH: master\n\n    steps:\n      - name: Check out Termux-ZRAM app\n        uses: actions/checkout@v6\n\n      - name: Set up Java\n        uses: actions/setup-java@v5\n        with:\n          distribution: temurin\n          java-version: '17'\n\n      - name: Test RAMZ core on host\n        run: |\n          sudo apt-get update\n          sudo apt-get install -y liblz4-dev libzstd-dev\n          make -C ramz-native clean\n          make -C ramz-native TEST_HOOKS=1 test\n          make -C ramz-native benchmark\n\n      - name: Build a matching ARM64 bootstrap\n        shell: bash\n        run: |\n          set -euxo pipefail\n          git clone --depth=1 --branch "$TERMUX_PACKAGES_BRANCH" https://github.com/termux/termux-packages.git termux-packages-build\n          cp -a termux-packages/packages/ramz termux-packages-build/packages/ramz\n          curl -fsSL -o ramz-source.tar.gz "https://github.com/${GITHUB_REPOSITORY}/archive/${GITHUB_SHA}.tar.gz"\n          RAMZ_SHA256="$(sha256sum ramz-source.tar.gz | awk '{print $1}')"\n          sed -i "s|refs/heads/zram-runtime|${GITHUB_SHA}|" termux-packages-build/packages/ramz/build.sh\n          sed -i "s/REPLACE_WITH_WORKFLOW_SHA256/${RAMZ_SHA256}/" termux-packages-build/packages/ramz/build.sh\n          sed -i 's/^TERMUX_APP__PACKAGE_NAME=.*/TERMUX_APP__PACKAGE_NAME="com.termuxzram"/' termux-packages-build/scripts/properties.sh\n          sed -i 's|^TERMUX_APP__DATA_DIR=.*|TERMUX_APP__DATA_DIR="/data/data/$TERMUX_APP__PACKAGE_NAME"|' termux-packages-build/scripts/properties.sh\n          cd termux-packages-build\n          ./scripts/run-docker.sh ./clean.sh\n          ./scripts/run-docker.sh ./scripts/build-bootstraps.sh --architectures aarch64 --add ramz\n          test -s bootstrap-aarch64.zip\n          unzip -l bootstrap-aarch64.zip | grep -E 'usr/bin/ramz$'\n          unzip -l bootstrap-aarch64.zip | grep -E 'usr/lib/libramz\.so$'\n          mkdir -p ../app/src/main/cpp\n          cp bootstrap-aarch64.zip ../app/src/main/cpp/bootstrap-aarch64.zip\n          sha256sum ../app/src/main/cpp/bootstrap-aarch64.zip > ../bootstrap-aarch64.zip.sha256\n          cd ..\n\n      - name: Validate bootstrap prefix and ABI\n        run: |\n          set -euxo pipefail\n          unzip -p app/src/main/cpp/bootstrap-aarch64.zip usr/bin/ramz > ramz\n          chmod +x ramz\n          file ramz | grep -E 'ARM aarch64|ARM64'\n          unzip -p app/src/main/cpp/bootstrap-aarch64.zip usr/lib/libramz.so > libramz.so\n          file libramz.so | grep -E 'ARM aarch64|ARM64'\n\n      - name: Build ARM64 APK\n        shell: bash\n        run: |\n          set -euxo pipefail\n          export TERMUX_ZRAM_BOOTSTRAP_AARCH64_SHA256="$(sha256sum app/src/main/cpp/bootstrap-aarch64.zip | awk '{print $1}')"\n          export TERMUX_APP_VERSION_NAME=0.118.0-zram.1\n          export TERMUX_APK_VERSION_TAG="termux-zram-${GITHUB_SHA}"\n          export TERMUX_SPLIT_APKS_FOR_DEBUG_BUILDS=1\n          ./gradlew --no-daemon assembleDebug\n\n      - name: Validate APK identity and ABI\n        run: |\n          set -euxo pipefail\n          APK="$(find app/build/outputs/apk/debug -name '*arm64-v8a.apk' -print -quit)"\n          test -n "$APK"\n          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/aapt" dump badging "$APK" | grep "package: name='com.termuxzram'"\n          unzip -l "$APK" | grep -E 'lib/arm64-v8a/libtermux-bootstrap\.so$'\n          cp "$APK" Termux-ZRAM-arm64-v8a-debug.apk\n          sha256sum Termux-ZRAM-arm64-v8a-debug.apk > Termux-ZRAM-arm64-v8a-debug.apk.sha256\n\n      - name: Publish ARM64 APK and bootstrap\n        uses: actions/upload-artifact@v6\n        with:\n          name: Termux-ZRAM-arm64-v8a\n          path: |\n            Termux-ZRAM-arm64-v8a-debug.apk\n            Termux-ZRAM-arm64-v8a-debug.apk.sha256\n            app/src/main/cpp/bootstrap-aarch64.zip\n            bootstrap-aarch64.zip.sha256\n          if-no-files-found: error\n
+name: Build Termux-ZRAM ARM64
+
+on:
+  push:
+    branches: [zram-runtime]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      APP_ID: com.termuxzram
+      TERMUX_PACKAGE_VARIANT: apt-android-7
+      TERMUX_PACKAGES_BRANCH: master
+
+    steps:
+      - name: Check out Termux-ZRAM app
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Test RAMZ core on host
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liblz4-dev libzstd-dev
+          make -C ramz-native clean
+          make -C ramz-native TEST_HOOKS=1 test
+          make -C ramz-native benchmark
+
+      - name: Build a matching ARM64 bootstrap
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth=1 --branch "$TERMUX_PACKAGES_BRANCH" https://github.com/termux/termux-packages.git termux-packages-build
+          cp -a termux-packages/packages/ramz termux-packages-build/packages/ramz
+          curl -fsSL -o ramz-source.tar.gz "https://github.com/${GITHUB_REPOSITORY}/archive/${GITHUB_SHA}.tar.gz"
+          RAMZ_SHA256="$(sha256sum ramz-source.tar.gz | awk '{print $1}')"
+          sed -i "s|refs/heads/zram-runtime|${GITHUB_SHA}|" termux-packages-build/packages/ramz/build.sh
+          sed -i "s/REPLACE_WITH_WORKFLOW_SHA256/${RAMZ_SHA256}/" termux-packages-build/packages/ramz/build.sh
+          sed -i 's/^TERMUX_APP__PACKAGE_NAME=.*/TERMUX_APP__PACKAGE_NAME="com.termuxzram"/' termux-packages-build/scripts/properties.sh
+          sed -i 's|^TERMUX_APP__DATA_DIR=.*|TERMUX_APP__DATA_DIR="/data/data/$TERMUX_APP__PACKAGE_NAME"|' termux-packages-build/scripts/properties.sh
+          cd termux-packages-build
+          ./scripts/run-docker.sh ./clean.sh
+          ./scripts/run-docker.sh ./scripts/build-bootstraps.sh --architectures aarch64 --add ramz
+          test -s bootstrap-aarch64.zip
+          unzip -l bootstrap-aarch64.zip | grep -E 'usr/bin/ramz$'
+          unzip -l bootstrap-aarch64.zip | grep -E 'usr/lib/libramz\.so$'
+          mkdir -p ../app/src/main/cpp
+          cp bootstrap-aarch64.zip ../app/src/main/cpp/bootstrap-aarch64.zip
+          sha256sum ../app/src/main/cpp/bootstrap-aarch64.zip > ../bootstrap-aarch64.zip.sha256
+          cd ..
+
+      - name: Validate bootstrap prefix and ABI
+        run: |
+          set -euxo pipefail
+          unzip -p app/src/main/cpp/bootstrap-aarch64.zip usr/bin/ramz > ramz
+          chmod +x ramz
+          file ramz | grep -E 'ARM aarch64|ARM64'
+          unzip -p app/src/main/cpp/bootstrap-aarch64.zip usr/lib/libramz.so > libramz.so
+          file libramz.so | grep -E 'ARM aarch64|ARM64'
+
+      - name: Build ARM64 APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export TERMUX_ZRAM_BOOTSTRAP_AARCH64_SHA256="$(sha256sum app/src/main/cpp/bootstrap-aarch64.zip | awk '{print $1}')"
+          export TERMUX_APP_VERSION_NAME=0.118.0-zram.1
+          export TERMUX_APK_VERSION_TAG="termux-zram-${GITHUB_SHA}"
+          export TERMUX_SPLIT_APKS_FOR_DEBUG_BUILDS=1
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Validate APK identity and ABI
+        run: |
+          set -euxo pipefail
+          APK="$(find app/build/outputs/apk/debug -name '*arm64-v8a.apk' -print -quit)"
+          test -n "$APK"
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/aapt" dump badging "$APK" | grep "package: name='com.termuxzram'"
+          unzip -l "$APK" | grep -E 'lib/arm64-v8a/libtermux-bootstrap\.so$'
+          cp "$APK" Termux-ZRAM-arm64-v8a-debug.apk
+          sha256sum Termux-ZRAM-arm64-v8a-debug.apk > Termux-ZRAM-arm64-v8a-debug.apk.sha256
+
+      - name: Publish ARM64 APK and bootstrap
+        uses: actions/upload-artifact@v6
+        with:
+          name: Termux-ZRAM-arm64-v8a
+          path: |
+            Termux-ZRAM-arm64-v8a-debug.apk
+            Termux-ZRAM-arm64-v8a-debug.apk.sha256
+            app/src/main/cpp/bootstrap-aarch64.zip
+            bootstrap-aarch64.zip.sha256
+          if-no-files-found: error
