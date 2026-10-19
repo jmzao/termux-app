@@ -15,7 +15,10 @@ TERMUX_PKG_AUTO_UPDATE=false
 TERMUX_PKG_BUILD_IN_SRC=true
 
 # The source tree has a CMake file for local development, but the package is
-# intentionally built with its Termux-aware Makefile below.
+# intentionally built with its Termux-aware Makefile below. The Makefile only
+# consumes CXXFLAGS, whereas termux-packages normally exports the prefix paths
+# through other variables. Put the target prefix paths directly into CXXFLAGS:
+# both zstd.h/lz4.h and their shared libraries live there during bootstrap.
 termux_step_configure() {
     :
 }
@@ -23,13 +26,13 @@ termux_step_configure() {
 termux_step_make() {
     cd "$TERMUX_PKG_SRCDIR/ramz-native"
     make build/libramz.so build/ramz build/ramz-benchmark \
-        CXXFLAGS="$CXXFLAGS ${CPPFLAGS:-}" \
+        CXXFLAGS="$CXXFLAGS -I$TERMUX_PREFIX/include -L$TERMUX_PREFIX/lib ${CPPFLAGS:-} ${LDFLAGS:-}" \
         LZ4_LIB=-l:liblz4.so.1 ZSTD_LIB=-l:libzstd.so.1
 }
 
 termux_step_make_install() {
     cd "$TERMUX_PKG_SRCDIR/ramz-native"
     make PREFIX="$TERMUX_PREFIX" DESTDIR="$TERMUX_PKG_MASSAGEDIR" \
-        CXXFLAGS="$CXXFLAGS ${CPPFLAGS:-}" \
+        CXXFLAGS="$CXXFLAGS -I$TERMUX_PREFIX/include -L$TERMUX_PREFIX/lib ${CPPFLAGS:-} ${LDFLAGS:-}" \
         LZ4_LIB=-l:liblz4.so.1 ZSTD_LIB=-l:libzstd.so.1 install
 }
