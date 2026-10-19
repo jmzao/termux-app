@@ -1,0 +1,5 @@
+Termux-ZRAM source fork
+Upstream: https://github.com/termux/termux-app
+App identity: com.termuxzram
+Bootstrap prefix: /data/data/com.termuxzram/files/usr
+See TERMUX_ZRAM.md before creating a distributable APK.
