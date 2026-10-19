@@ -42,6 +42,9 @@ jobs:
           git -C termux-packages-build fetch --depth=1 origin "$TERMUX_PACKAGES_REF"
           git -C termux-packages-build checkout --detach "$TERMUX_PACKAGES_REF"
           cp -a termux-packages/packages/ramz termux-packages-build/packages/ramz
+          # libcap-ng's cap-audit helper is not supported in this cross-bootstrap.
+          # Explicitly disable it so the bootstrap contains only Termux runtime tools.
+          sed -i '/^TERMUX_PKG_EXTRA_CONFIGURE_ARGS=/a --disable-cap-audit' termux-packages-build/packages/libcap-ng/build.sh
           curl -fsSL -o ramz-source.tar.gz "https://github.com/${GITHUB_REPOSITORY}/archive/${GITHUB_SHA}.tar.gz"
           RAMZ_SHA256="$(sha256sum ramz-source.tar.gz | awk '{print $1}')"
           sed -i "s|refs/heads/zram-runtime|${GITHUB_SHA}|" termux-packages-build/packages/ramz/build.sh
