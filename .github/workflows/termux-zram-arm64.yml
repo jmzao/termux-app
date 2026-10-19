@@ -34,7 +34,7 @@ jobs:
           make -C ramz-native TEST_HOOKS=1 test
           make -C ramz-native benchmark
 
-      - name: Build a matching ARM64 bootstrap
+      - name: Build matching ARM64 bootstrap
         shell: bash
         run: |
           set -euxo pipefail
@@ -42,9 +42,25 @@ jobs:
           git -C termux-packages-build fetch --depth=1 origin "$TERMUX_PACKAGES_REF"
           git -C termux-packages-build checkout --detach "$TERMUX_PACKAGES_REF"
           cp -a termux-packages/packages/ramz termux-packages-build/packages/ramz
-          # libcap-ng's cap-audit helper is not supported in this cross-bootstrap.
-          # Explicitly disable it so the bootstrap contains only Termux runtime tools.
-          sed -i '/^TERMUX_PKG_EXTRA_CONFIGURE_ARGS=/a --disable-cap-audit' termux-packages-build/packages/libcap-ng/build.sh
+          # libcap-ng 0.9.6 runs autoreconf over cap-audit and fails this ARM64 bootstrap.
+          # Keep the current Termux tree, but use the previous stable libcap-ng recipe.
+          cat > termux-packages-build/packages/libcap-ng/build.sh <<"EOF"
+          TERMUX_PKG_HOMEPAGE=https://people.redhat.com/sgrubb/libcap-ng/
+          TERMUX_PKG_DESCRIPTION="Library making programming with POSIX capabilities easier than traditional libcap"
+          TERMUX_PKG_LICENSE="LGPL-2.1"
+          TERMUX_PKG_MAINTAINER="@termux"
+          TERMUX_PKG_VERSION="2:0.8.5"
+          TERMUX_PKG_SRCURL=https://github.com/stevegrubb/libcap-ng/archive/v${TERMUX_PKG_VERSION:2}.tar.gz
+          TERMUX_PKG_SHA256=e4be07fdd234f10b866433f224d183626003c65634ed0552b02e654a380244c2
+          TERMUX_PKG_AUTO_UPDATE=false
+          TERMUX_PKG_EXTRA_CONFIGURE_ARGS="
+          --without-python
+          --without-python3
+          "
+          termux_step_pre_configure() {
+              ./autogen.sh
+          }
+          EOF
           curl -fsSL -o ramz-source.tar.gz "https://github.com/${GITHUB_REPOSITORY}/archive/${GITHUB_SHA}.tar.gz"
           RAMZ_SHA256="$(sha256sum ramz-source.tar.gz | awk '{print $1}')"
           sed -i "s|refs/heads/zram-runtime|${GITHUB_SHA}|" termux-packages-build/packages/ramz/build.sh
@@ -62,7 +78,8 @@ jobs:
           sha256sum ../app/src/main/cpp/bootstrap-aarch64.zip > ../bootstrap-aarch64.zip.sha256
           cd ..
 
-      - name: Validate bootstrap prefix and ABI
+      - name: Validate bootstrap ABI
+        shell: bash
         run: |
           set -euxo pipefail
           unzip -p app/src/main/cpp/bootstrap-aarch64.zip bin/ramz > ramz
@@ -82,6 +99,7 @@ jobs:
           ./gradlew --no-daemon assembleDebug
 
       - name: Validate APK identity and ABI
+        shell: bash
         run: |
           set -euxo pipefail
           APK="$(find app/build/outputs/apk/debug -name '*arm64-v8a.apk' -print -quit)"
@@ -91,7 +109,7 @@ jobs:
           cp "$APK" Termux-ZRAM-arm64-v8a-debug.apk
           sha256sum Termux-ZRAM-arm64-v8a-debug.apk > Termux-ZRAM-arm64-v8a-debug.apk.sha256
 
-      - name: Publish ARM64 APK and bootstrap
+      - name: Publish verified ARM64 APK
         uses: actions/upload-artifact@v6
         with:
           name: Termux-ZRAM-arm64-v8a
