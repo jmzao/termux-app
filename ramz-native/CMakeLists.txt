@@ -1,1 +1,35 @@
-cmake_minimum_required(VERSION 3.22)\nproject(termux_zram LANGUAGES C CXX)\n\noption(RAMZ_BUILD_TESTS "Build integrity and benchmark tests" ON)\noption(RAMZ_ENABLE_TEST_HOOKS "Enable intentional-corruption test hook (test-only)" OFF)\n\nset(CMAKE_C_STANDARD 11)\nset(CMAKE_CXX_STANDARD 17)\nset(CMAKE_CXX_STANDARD_REQUIRED ON)\nset(CMAKE_POSITION_INDEPENDENT_CODE ON)\n\nfind_library(LZ4_LIBRARY NAMES lz4 REQUIRED)\nfind_library(ZSTD_LIBRARY NAMES zstd REQUIRED)\n\nadd_library(ramz SHARED native/src/ramz.cpp)\ntarget_include_directories(ramz PUBLIC native/include)\ntarget_compile_definitions(ramz PRIVATE _FILE_OFFSET_BITS=64)\nif(RAMZ_ENABLE_TEST_HOOKS)\n  target_compile_definitions(ramz PRIVATE RAMZ_ENABLE_TEST_HOOKS=1)\nendif()\ntarget_compile_options(ramz PRIVATE -Wall -Wextra -Wpedantic -Werror=return-type)\ntarget_link_libraries(ramz PRIVATE ${LZ4_LIBRARY} ${ZSTD_LIBRARY})\n\nadd_executable(ramz-cli cli/ramz.cpp)\ntarget_link_libraries(ramz-cli PRIVATE ramz)\nset_target_properties(ramz-cli PROPERTIES OUTPUT_NAME ramz BUILD_RPATH "$ORIGIN/../lib")\n\nif(RAMZ_BUILD_TESTS)\n  enable_testing()\n  add_executable(ramz-tests tests/test_ramz.cpp)\n  target_link_libraries(ramz-tests PRIVATE ramz)\n  add_test(NAME ramz-integrity COMMAND ramz-tests)\n  add_executable(ramz-benchmark tests/benchmark.cpp)\n  target_link_libraries(ramz-benchmark PRIVATE ramz)\nendif()\n
+cmake_minimum_required(VERSION 3.22)
+project(termux_zram LANGUAGES C CXX)
+
+option(RAMZ_BUILD_TESTS "Build integrity and benchmark tests" ON)
+option(RAMZ_ENABLE_TEST_HOOKS "Enable intentional-corruption test hook (test-only)" OFF)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+find_library(LZ4_LIBRARY NAMES lz4 REQUIRED)
+find_library(ZSTD_LIBRARY NAMES zstd REQUIRED)
+
+add_library(ramz SHARED native/src/ramz.cpp)
+target_include_directories(ramz PUBLIC native/include)
+target_compile_definitions(ramz PRIVATE _FILE_OFFSET_BITS=64)
+if(RAMZ_ENABLE_TEST_HOOKS)
+  target_compile_definitions(ramz PRIVATE RAMZ_ENABLE_TEST_HOOKS=1)
+endif()
+target_compile_options(ramz PRIVATE -Wall -Wextra -Wpedantic -Werror=return-type)
+target_link_libraries(ramz PRIVATE ${LZ4_LIBRARY} ${ZSTD_LIBRARY})
+
+add_executable(ramz-cli cli/ramz.cpp)
+target_link_libraries(ramz-cli PRIVATE ramz)
+set_target_properties(ramz-cli PROPERTIES OUTPUT_NAME ramz BUILD_RPATH "$ORIGIN/../lib")
+
+if(RAMZ_BUILD_TESTS)
+  enable_testing()
+  add_executable(ramz-tests tests/test_ramz.cpp)
+  target_link_libraries(ramz-tests PRIVATE ramz)
+  add_test(NAME ramz-integrity COMMAND ramz-tests)
+  add_executable(ramz-benchmark tests/benchmark.cpp)
+  target_link_libraries(ramz-benchmark PRIVATE ramz)
+endif()
