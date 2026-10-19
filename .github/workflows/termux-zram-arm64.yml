@@ -49,11 +49,11 @@ jobs:
           sed -i "s|^TERMUX_APP__DATA_DIR=.*|TERMUX_APP__DATA_DIR=\"/data/data/\$TERMUX_APP__PACKAGE_NAME\"|" termux-packages-build/scripts/properties.sh
           cd termux-packages-build
           ./scripts/run-docker.sh ./clean.sh
-          # The current installer uses the Android 10+ bootstrap layout.
           ./scripts/run-docker.sh ./scripts/build-bootstraps.sh --android10 --architectures aarch64 --add ramz 2>&1 | tee ../bootstrap-build.log
           test -s bootstrap-aarch64.zip
-          unzip -l bootstrap-aarch64.zip | grep -E "usr/bin/ramz$"
-          unzip -l bootstrap-aarch64.zip | grep -E "usr/lib/libramz\.so$"
+          # Android 10+ bootstrap ZIP is rooted at Termux prefix, not usr/.
+          unzip -l bootstrap-aarch64.zip | grep -E "[[:space:]]bin/ramz$"
+          unzip -l bootstrap-aarch64.zip | grep -E "[[:space:]]lib/libramz\.so$"
           mkdir -p ../app/src/main/cpp
           cp bootstrap-aarch64.zip ../app/src/main/cpp/bootstrap-aarch64.zip
           sha256sum ../app/src/main/cpp/bootstrap-aarch64.zip > ../bootstrap-aarch64.zip.sha256
@@ -62,10 +62,10 @@ jobs:
       - name: Validate bootstrap prefix and ABI
         run: |
           set -euxo pipefail
-          unzip -p app/src/main/cpp/bootstrap-aarch64.zip usr/bin/ramz > ramz
+          unzip -p app/src/main/cpp/bootstrap-aarch64.zip bin/ramz > ramz
           chmod +x ramz
           file ramz | grep -E "ARM aarch64|ARM64"
-          unzip -p app/src/main/cpp/bootstrap-aarch64.zip usr/lib/libramz.so > libramz.so
+          unzip -p app/src/main/cpp/bootstrap-aarch64.zip lib/libramz.so > libramz.so
           file libramz.so | grep -E "ARM aarch64|ARM64"
 
       - name: Build ARM64 APK
@@ -83,7 +83,7 @@ jobs:
           set -euxo pipefail
           APK="$(find app/build/outputs/apk/debug -name "*arm64-v8a.apk" -print -quit)"
           test -n "$APK"
-          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/aapt" dump badging "$APK" | grep "package: name='com.termuxzram'"
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/aapt" dump badging "$APK" | grep "package: name=com.termuxzram"
           unzip -l "$APK" | grep -E "lib/arm64-v8a/libtermux-bootstrap\.so$"
           cp "$APK" Termux-ZRAM-arm64-v8a-debug.apk
           sha256sum Termux-ZRAM-arm64-v8a-debug.apk > Termux-ZRAM-arm64-v8a-debug.apk.sha256
