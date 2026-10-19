@@ -34,7 +34,6 @@ jobs:
           git -C termux-packages-build fetch --depth=1 origin "$TERMUX_PACKAGES_REF"
           git -C termux-packages-build checkout --detach "$TERMUX_PACKAGES_REF"
           cp -a termux-packages/packages/ramz termux-packages-build/packages/ramz
-          sed -i "s/, libcap-ng//; s/--enable-setpriv/--disable-setpriv/" termux-packages-build/packages/util-linux/build.sh
           curl -fsSL -o ramz-source.tar.gz "https://github.com/${GITHUB_REPOSITORY}/archive/${GITHUB_SHA}.tar.gz"
           RAMZ_SHA256="$(sha256sum ramz-source.tar.gz | sed "s/ .*//")"
           sed -i "s|refs/heads/zram-runtime|${GITHUB_SHA}|; s/REPLACE_WITH_WORKFLOW_SHA256/${RAMZ_SHA256}/" termux-packages-build/packages/ramz/build.sh
@@ -48,12 +47,24 @@ jobs:
           grep -F "TERMUX_PACKAGE_NAME = \"com.termuxzram\"" termux-shared/src/main/java/com/termux/shared/termux/TermuxConstants.java
           cd termux-packages-build
           ./scripts/run-docker.sh ./clean.sh
-          sed -i "/^TERMUX_PKG_DEPENDS=/s/\<bzip2\>/libbz2/g" packages/dpkg/build.sh packages/termux-tools/build.sh
+          sed -i "s/, libcap-ng//; s/--enable-setpriv/--disable-setpriv/" packages/util-linux/build.sh
+          sed -i "/^TERMUX_PKG_DEPENDS=/s/\\<bzip2\\>/libbz2/g" packages/dpkg/build.sh packages/termux-tools/build.sh
           sed -i "s/PACKAGES+=(\"bzip2\")/PACKAGES+=(\"libbz2\")/" scripts/build-bootstraps.sh
-          sed -i -E "/PACKAGES\+=\(\"(ed|debianutils|dos2unix|inetutils|lsof|nano|net-tools|patch|unzip)\"\)/d" scripts/build-bootstraps.sh
+          sed -i "/^TERMUX_PKG_DEPENDS=/s/, util-linux//" packages/termux-tools/build.sh
+          sed -i "/PACKAGES+=(\"util-linux\")/d" scripts/build-bootstraps.sh
+          sed -i -E "/PACKAGES\\+=\\(\"(ed|debianutils|dos2unix|inetutils|lsof|nano|net-tools|patch|unzip)\"\\)/d" scripts/build-bootstraps.sh
           grep -F "PACKAGES+=(\"libbz2\")" scripts/build-bootstraps.sh
           ! grep -E "^TERMUX_PKG_DEPENDS=.*(^|, )bzip2([, ]|$)" packages/dpkg/build.sh packages/termux-tools/build.sh
+          ! grep -E "^TERMUX_PKG_DEPENDS=.*(^|, )util-linux([, ]|$)" packages/termux-tools/build.sh
+          ! grep -F "PACKAGES+=(\"util-linux\")" scripts/build-bootstraps.sh
+          set +e
           ./scripts/run-docker.sh ./scripts/build-bootstraps.sh --android10 --architectures aarch64 --add ramz 2>&1 | tee ../bootstrap-build.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            tail -n 180 ../bootstrap-build.log
+            exit "$status"
+          fi
           test -s bootstrap-aarch64.zip
           unzip -l bootstrap-aarch64.zip | grep -E "[[:space:]]bin/ramz$"
           unzip -l bootstrap-aarch64.zip | grep -E "[[:space:]]lib/libramz[.]so$"
