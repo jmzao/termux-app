@@ -39,13 +39,15 @@ jobs:
           sed -i "s|refs/heads/zram-runtime|${GITHUB_SHA}|; s/REPLACE_WITH_WORKFLOW_SHA256/${RAMZ_SHA256}/" termux-packages-build/packages/ramz/build.sh
           sed -i "s/^TERMUX_APP__PACKAGE_NAME=.*/TERMUX_APP__PACKAGE_NAME=\"com.termuxzram\"/" termux-packages-build/scripts/properties.sh
           sed -i "s|^TERMUX_APP__DATA_DIR=.*|TERMUX_APP__DATA_DIR=\"/data/data/\$TERMUX_APP__PACKAGE_NAME\"|" termux-packages-build/scripts/properties.sh
-          sed -i "/    defaultConfig {/a\        applicationId \"com.termuxzram\"" app/build.gradle
+          sed -i "/ defaultConfig {/a\ applicationId \"com.termuxzram\"" app/build.gradle
           sed -i "s/manifestPlaceholders.TERMUX_PACKAGE_NAME = \"com.termux\"/manifestPlaceholders.TERMUX_PACKAGE_NAME = \"com.termuxzram\"/" app/build.gradle
           sed -i "s/public static final String TERMUX_PACKAGE_NAME = \"com.termux\"/public static final String TERMUX_PACKAGE_NAME = \"com.termuxzram\"/" termux-shared/src/main/java/com/termux/shared/termux/TermuxConstants.java
-          sed -i "s/<!ENTITY TERMUX_PACKAGE_NAME \"com.termux\">/<!ENTITY TERMUX_PACKAGE_NAME \"com.termuxzram\">/; s/<!ENTITY TERMUX_APP_NAME \"Termux\">/<!ENTITY TERMUX_APP_NAME \"Termux-ZRAM\">/" app/src/main/res/values/strings.xml
+          sed -i "s/ / /; s/ / /" app/src/main/res/values/strings.xml
           grep -F "applicationId \"com.termuxzram\"" app/build.gradle
           grep -F "TERMUX_PACKAGE_NAME = \"com.termuxzram\"" termux-shared/src/main/java/com/termux/shared/termux/TermuxConstants.java
           cd termux-packages-build
+          sed -i "s|http://download.savannah.gnu.org/releases/attr/|https://download.savannah.gnu.org/releases/attr/|" packages/attr/build.sh
+          grep -F "https://download.savannah.gnu.org/releases/attr/attr-" packages/attr/build.sh
           ./scripts/run-docker.sh ./clean.sh
           sed -i "s/, libcap-ng//; s/--enable-setpriv/--disable-setpriv/" packages/util-linux/build.sh
           sed -i "/^TERMUX_PKG_DEPENDS=/s/\\<bzip2\\>/libbz2/g" packages/dpkg/build.sh packages/termux-tools/build.sh
