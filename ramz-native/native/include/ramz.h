@@ -1,1 +1,63 @@
-#ifndef RAMZ_H\n#define RAMZ_H\n\n#include <stddef.h>\n#include <stdint.h>\n\n#ifdef __cplusplus\nextern "C" {\n#endif\n\ntypedef struct ramz_store ramz_store;\ntypedef uint64_t ramz_handle;\n\ntypedef enum { RAMZ_LZ4 = 1, RAMZ_ZSTD = 2 } ramz_algorithm;\ntypedef enum {\n  RAMZ_OK = 0,\n  RAMZ_EINVAL = -1,\n  RAMZ_ENOMEM = -2,\n  RAMZ_ENOTFOUND = -3,\n  RAMZ_ECORRUPT = -4,\n  RAMZ_EINCOMPRESSIBLE = -5,\n  RAMZ_ESTATE = -6\n} ramz_result;\n\ntypedef struct {\n  ramz_algorithm algorithm;\n  size_t min_compress_bytes;      /* Skip tiny objects. Default: 4096. */\n  size_t min_savings_bytes;       /* Require net payload savings. Default: 128. */\n  size_t max_stored_bytes;        /* 0 = no limit. */\n  int zstd_level;                 /* 1..22; default 3. */\n  int max_cpu_percent;            /* 1..100; call-level throttle, default 100. */\n  int verify_after_compress;      /* Decompress and checksum before release. */\n} ramz_config;\n\ntypedef struct {\n  uint64_t puts, gets, releases;\n  uint64_t compressed_blocks, raw_blocks, skipped_blocks;\n  uint64_t compression_failures, decompression_failures, integrity_failures;\n  uint64_t original_bytes, stored_payload_bytes, metadata_bytes;\n  uint64_t compression_ns, decompression_ns;\n  uint64_t peak_stored_bytes;\n} ramz_stats;\n\nvoid ramz_config_default(ramz_config *config);\nramz_store *ramz_store_create(const ramz_config *config);\nvoid ramz_store_destroy(ramz_store *store);\nramz_result ramz_store_set_config(ramz_store *store, const ramz_config *config);\n/* Always assigns a handle when RAMZ_OK or RAMZ_EINCOMPRESSIBLE is returned.\n * RAMZ_EINCOMPRESSIBLE means the block was retained raw because compression was\n * not a net win; callers must still release the returned handle. */\nramz_result ramz_put(ramz_store *store, const void *data, size_t size, ramz_handle *out_handle);\nramz_result ramz_get(ramz_store *store, ramz_handle handle, void *out, size_t out_size, size_t *out_written);\nramz_result ramz_release(ramz_store *store, ramz_handle handle);\nramz_result ramz_get_stats(ramz_store *store, ramz_stats *out);\nconst char *ramz_result_string(ramz_result result);\n#ifdef RAMZ_ENABLE_TEST_HOOKS\nramz_result ramz_test_corrupt(ramz_store *store, ramz_handle handle);\n#endif\n\n#ifdef __cplusplus\n}\n#endif\n#endif\n
+#ifndef RAMZ_H
+#define RAMZ_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct ramz_store ramz_store;
+typedef uint64_t ramz_handle;
+
+typedef enum { RAMZ_LZ4 = 1, RAMZ_ZSTD = 2 } ramz_algorithm;
+typedef enum {
+  RAMZ_OK = 0,
+  RAMZ_EINVAL = -1,
+  RAMZ_ENOMEM = -2,
+  RAMZ_ENOTFOUND = -3,
+  RAMZ_ECORRUPT = -4,
+  RAMZ_EINCOMPRESSIBLE = -5,
+  RAMZ_ESTATE = -6
+} ramz_result;
+
+typedef struct {
+  ramz_algorithm algorithm;
+  size_t min_compress_bytes;      /* Skip tiny objects. Default: 4096. */
+  size_t min_savings_bytes;       /* Require net payload savings. Default: 128. */
+  size_t max_stored_bytes;        /* 0 = no limit. */
+  int zstd_level;                 /* 1..22; default 3. */
+  int max_cpu_percent;            /* 1..100; call-level throttle, default 100. */
+  int verify_after_compress;      /* Decompress and checksum before release. */
+} ramz_config;
+
+typedef struct {
+  uint64_t puts, gets, releases;
+  uint64_t compressed_blocks, raw_blocks, skipped_blocks;
+  uint64_t compression_failures, decompression_failures, integrity_failures;
+  uint64_t original_bytes, stored_payload_bytes, metadata_bytes;
+  uint64_t compression_ns, decompression_ns;
+  uint64_t peak_stored_bytes;
+} ramz_stats;
+
+void ramz_config_default(ramz_config *config);
+ramz_store *ramz_store_create(const ramz_config *config);
+void ramz_store_destroy(ramz_store *store);
+ramz_result ramz_store_set_config(ramz_store *store, const ramz_config *config);
+/* Always assigns a handle when RAMZ_OK or RAMZ_EINCOMPRESSIBLE is returned.
+ * RAMZ_EINCOMPRESSIBLE means the block was retained raw because compression was
+ * not a net win; callers must still release the returned handle. */
+ramz_result ramz_put(ramz_store *store, const void *data, size_t size, ramz_handle *out_handle);
+ramz_result ramz_get(ramz_store *store, ramz_handle handle, void *out, size_t out_size, size_t *out_written);
+ramz_result ramz_release(ramz_store *store, ramz_handle handle);
+ramz_result ramz_get_stats(ramz_store *store, ramz_stats *out);
+const char *ramz_result_string(ramz_result result);
+#ifdef RAMZ_ENABLE_TEST_HOOKS
+ramz_result ramz_test_corrupt(ramz_store *store, ramz_handle handle);
+#endif
+
+#ifdef __cplusplus
+}
+#endif
+#endif
