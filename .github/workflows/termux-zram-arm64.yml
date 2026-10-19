@@ -1,1 +1,105 @@
-$name: Build Termux-ZRAM ARM64\non:\n  push:\n    branches: [zram-runtime]\n  workflow_dispatch:\npermissions:\n  contents: read\njobs:\n  build:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 120\n    env:\n      TERMUX_PACKAGES_REF: c208d019879c2d790ca50fe30d144b9a5979dfbf\n    steps:\n      - uses: actions/checkout@v6\n      - uses: actions/setup-java@v5\n        with:\n          distribution: temurin\n          java-version: "17"\n      - name: Test RAMZ core\n        run: |\n          set -euxo pipefail\n          sudo apt-get update\n          sudo apt-get install -y liblz4-dev libzstd-dev\n          make -C ramz-native clean\n          make -C ramz-native TEST_HOOKS=1 test\n          make -C ramz-native benchmark\n      - name: Build custom ARM64 bootstrap\n        shell: bash\n        run: |\n          set -euxo pipefail\n          touch bootstrap-build.log\n          git clone --depth=1 https://github.com/termux/termux-packages.git termux-packages-build\n          git -C termux-packages-build fetch --depth=1 origin "$TERMUX_PACKAGES_REF"\n          git -C termux-packages-build checkout --detach "$TERMUX_PACKAGES_REF"\n          cp -a termux-packages/packages/ramz termux-packages-build/packages/ramz\n          curl -fsSL -o ramz-source.tar.gz "https://github.com/${GITHUB_REPOSITORY}/archive/${GITHUB_SHA}.tar.gz"\n          RAMZ_SHA256="$(sha256sum ramz-source.tar.gz | sed "s/ .*//")"\n          sed -i "s|refs/heads/zram-runtime|${GITHUB_SHA}|; s/REPLACE_WITH_WORKFLOW_SHA256/${RAMZ_SHA256}/" termux-packages-build/packages/ramz/build.sh\n          sed -i "s/^TERMUX_APP__PACKAGE_NAME=.*/TERMUX_APP__PACKAGE_NAME=\\"com.termuxzram\\"/" termux-packages-build/scripts/properties.sh\n          sed -i "s|^TERMUX_APP__DATA_DIR=.*|TERMUX_APP__DATA_DIR=\\"/data/data/\\$TERMUX_APP__PACKAGE_NAME\\"|" termux-packages-build/scripts/properties.sh\n          sed -i "/ defaultConfig {/a\\ applicationId \\"com.termuxzram\\"" app/build.gradle\n          sed -i "s/manifestPlaceholders.TERMUX_PACKAGE_NAME = \\"com.termux\\"/manifestPlaceholders.TERMUX_PACKAGE_NAME = \\"com.termuxzram\\"/" app/build.gradle\n          sed -i "s/public static final String TERMUX_PACKAGE_NAME = \\"com.termux\\"/public static final String TERMUX_PACKAGE_NAME = \\"com.termuxzram\\"/" termux-shared/src/main/java/com/termux/shared/termux/TermuxConstants.java\n          sed -i "s/ / /; s/ / /" app/src/main/res/values/strings.xml\n          grep -F "applicationId \\"com.termuxzram\\"" app/build.gradle\n          grep -F "TERMUX_PACKAGE_NAME = \\"com.termuxzram\\"" termux-shared/src/main/java/com/termux/shared/termux/TermuxConstants.java\n          cd termux-packages-build\n          ATTR_ARCHIVE="packages/attr/attr-2.6.0.tar.gz"\n          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 --retry-max-time 300 \\\n            --output "$ATTR_ARCHIVE" "https://mirror.ac2.se/mirror/gnu.org/savannah/attr/attr-2.6.0.tar.gz"\n          echo "d42fa374513180bb48cb11a46696f488240e5124ff1e6ad88b0abff706985612  $ATTR_ARCHIVE" | sha256sum --check --status\n          sed -i 's|^TERMUX_PKG_SRCURL=.*|TERMUX_PKG_SRCURL="file:///home/builder/termux-packages/packages/attr/attr-2.6.0.tar.gz"|' packages/attr/build.sh\n          grep -F 'TERMUX_PKG_SRCURL="file:///home/builder/termux-packages/packages/attr/attr-2.6.0.tar.gz"' packages/attr/build.sh\n          ./scripts/run-docker.sh ./clean.sh\n          sed -i "s/, libcap-ng//; s/--enable-setpriv/--disable-setpriv/" packages/util-linux/build.sh\n          sed -i "/^TERMUX_PKG_DEPENDS=/s/\\\\<bzip2\\\\>/libbz2/g" packages/dpkg/build.sh packages/termux-tools/build.sh\n          sed -i "s/PACKAGES+=(\\"bzip2\\")/PACKAGES+=(\\"libbz2\\")/" scripts/build-bootstraps.sh\n          sed -i "/^TERMUX_PKG_DEPENDS=/s/, util-linux//" packages/termux-tools/build.sh\n          sed -i "/PACKAGES+=(\\"util-linux\\")/d" scripts/build-bootstraps.sh\n          sed -i -E "/PACKAGES\\\\+=\\\\(\\"(ed|debianutils|dos2unix|inetutils|lsof|nano|net-tools|patch|unzip)\\"\\\\)/d" scripts/build-bootstraps.sh\n          grep -F "PACKAGES+=(\\"libbz2\\")" scripts/build-bootstraps.sh\n          ! grep -E "^TERMUX_PKG_DEPENDS=.*(^|, )bzip2([, ]|$)" packages/dpkg/build.sh packages/termux-tools/build.sh\n          ! grep -E "^TERMUX_PKG_DEPENDS=.*(^|, )util-linux([, ]|$)" packages/termux-tools/build.sh\n          ! grep -F "PACKAGES+=(\\"util-linux\\")" scripts/build-bootstraps.sh\n          set +e\n          ./scripts/run-docker.sh ./scripts/build-bootstraps.sh --android10 --architectures aarch64 --add ramz 2>&1 | tee ../bootstrap-build.log\n          status=${PIPESTATUS[0]}\n          set -e\n          if [ "$status" -ne 0 ]; then\n            tail -n 180 ../bootstrap-build.log\n            exit "$status"\n          fi\n          test -s bootstrap-aarch64.zip\n          unzip -l bootstrap-aarch64.zip | grep -E "[[:space:]]bin/ramz$"\n          unzip -l bootstrap-aarch64.zip | grep -E "[[:space:]]lib/libramz[.]so$"\n          cp bootstrap-aarch64.zip ../app/src/main/cpp/bootstrap-aarch64.zip\n          sha256sum ../app/src/main/cpp/bootstrap-aarch64.zip > ../bootstrap-aarch64.zip.sha256\n      - name: Validate bootstrap ARM64\n        run: |\n          unzip -p app/src/main/cpp/bootstrap-aarch64.zip bin/ramz > ramz\n          unzip -p app/src/main/cpp/bootstrap-aarch64.zip lib/libramz.so > libramz.so\n          file ramz libramz.so | grep -E "ARM aarch64|ARM64"\n      - name: Build and validate APK\n        run: |\n          set -euxo pipefail\n          export TERMUX_ZRAM_BOOTSTRAP_AARCH64_SHA256="$(sha256sum app/src/main/cpp/bootstrap-aarch64.zip | sed "s/ .*//")"\n          export TERMUX_APP_VERSION_NAME=0.118.0-zram.1\n          export TERMUX_APK_VERSION_TAG="termux-zram-${GITHUB_SHA}"\n          export TERMUX_SPLIT_APKS_FOR_DEBUG_BUILDS=1\n          ./gradlew --no-daemon assembleDebug\n          APK="$(find app/build/outputs/apk/debug -name "*arm64-v8a.apk" -print -quit)"\n          test -n "$APK"\n          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/aapt" dump badging "$APK" | grep "com.termuxzram"\n          unzip -l "$APK" | grep -E "lib/arm64-v8a/libtermux-bootstrap[.]so$"\n          cp "$APK" Termux-ZRAM-arm64-v8a-debug.apk\n          sha256sum Termux-ZRAM-arm64-v8a-debug.apk > Termux-ZRAM-arm64-v8a-debug.apk.sha256\n      - name: Publish verified APK\n        uses: actions/upload-artifact@v6\n        with:\n          name: Termux-ZRAM-arm64-v8a\n          path: |\n            Termux-ZRAM-arm64-v8a-debug.apk\n            Termux-ZRAM-arm64-v8a-debug.apk.sha256\n            app/src/main/cpp/bootstrap-aarch64.zip\n            bootstrap-aarch64.zip.sha256\n          if-no-files-found: error\n      - name: Preserve bootstrap diagnostics\n        if: failure()\n        uses: actions/upload-artifact@v6\n        with:\n          name: Termux-ZRAM-bootstrap-build-log\n          path: bootstrap-build.log\n          if-no-files-found: warn
+name: Build Termux-ZRAM ARM64
+on:
+  push:
+    branches: [zram-runtime]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      TERMUX_PACKAGES_REF: c208d019879c2d790ca50fe30d144b9a5979dfbf
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Test RAMZ core
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y liblz4-dev libzstd-dev
+          make -C ramz-native clean
+          make -C ramz-native TEST_HOOKS=1 test
+          make -C ramz-native benchmark
+      - name: Build custom ARM64 bootstrap
+        shell: bash
+        run: |
+          set -euxo pipefail
+          touch bootstrap-build.log
+          git clone --depth=1 https://github.com/termux/termux-packages.git termux-packages-build
+          git -C termux-packages-build fetch --depth=1 origin "$TERMUX_PACKAGES_REF"
+          git -C termux-packages-build checkout --detach "$TERMUX_PACKAGES_REF"
+          cp -a termux-packages/packages/ramz termux-packages-build/packages/ramz
+          curl -fsSL -o ramz-source.tar.gz "https://github.com/${GITHUB_REPOSITORY}/archive/${GITHUB_SHA}.tar.gz"
+          RAMZ_SHA256="$(sha256sum ramz-source.tar.gz | sed "s/ .*//")"
+          sed -i "s|refs/heads/zram-runtime|${GITHUB_SHA}|; s/REPLACE_WITH_WORKFLOW_SHA256/${RAMZ_SHA256}/" termux-packages-build/packages/ramz/build.sh
+          sed -i "s/^TERMUX_APP__PACKAGE_NAME=.*/TERMUX_APP__PACKAGE_NAME=\"com.termuxzram\"/" termux-packages-build/scripts/properties.sh
+          sed -i "s|^TERMUX_APP__DATA_DIR=.*|TERMUX_APP__DATA_DIR=\"/data/data/\$TERMUX_APP__PACKAGE_NAME\"|" termux-packages-build/scripts/properties.sh
+          sed -i "/^[[:space:]]*defaultConfig[[:space:]]*{/a\        applicationId \"com.termuxzram\"" app/build.gradle
+          sed -i "s/manifestPlaceholders.TERMUX_PACKAGE_NAME = \"com.termux\"/manifestPlaceholders.TERMUX_PACKAGE_NAME = \"com.termuxzram\"/" app/build.gradle
+          sed -i "s/public static final String TERMUX_PACKAGE_NAME = \"com.termux\"/public static final String TERMUX_PACKAGE_NAME = \"com.termuxzram\"/" termux-shared/src/main/java/com/termux/shared/termux/TermuxConstants.java
+          sed -i "s/<!ENTITY TERMUX_PACKAGE_NAME \"com.termux\">/<!ENTITY TERMUX_PACKAGE_NAME \"com.termuxzram\">/; s/<!ENTITY TERMUX_APP_NAME \"Termux\">/<!ENTITY TERMUX_APP_NAME \"Termux-ZRAM\">/" app/src/main/res/values/strings.xml
+          grep -F "applicationId \"com.termuxzram\"" app/build.gradle
+          grep -F "TERMUX_PACKAGE_NAME = \"com.termuxzram\"" termux-shared/src/main/java/com/termux/shared/termux/TermuxConstants.java
+          cd termux-packages-build
+          ATTR_ARCHIVE="packages/attr/attr-2.6.0.tar.gz"
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 --retry-max-time 300 --output "$ATTR_ARCHIVE" "https://mirror.ac2.se/mirror/gnu.org/savannah/attr/attr-2.6.0.tar.gz"
+          echo "d42fa374513180bb48cb11a46696f488240e5124ff1e6ad88b0abff706985612  $ATTR_ARCHIVE" | sha256sum --check --status
+          sed -i 's|^TERMUX_PKG_SRCURL=.*|TERMUX_PKG_SRCURL="file:///home/builder/termux-packages/packages/attr/attr-2.6.0.tar.gz"|' packages/attr/build.sh
+          ./scripts/run-docker.sh ./clean.sh
+          sed -i "s/, libcap-ng//; s/--enable-setpriv/--disable-setpriv/" packages/util-linux/build.sh
+          sed -i "/^TERMUX_PKG_DEPENDS=/s/\\<bzip2\\>/libbz2/g" packages/dpkg/build.sh packages/termux-tools/build.sh
+          sed -i "s/PACKAGES+=(\"bzip2\")/PACKAGES+=(\"libbz2\")/" scripts/build-bootstraps.sh
+          sed -i "/^TERMUX_PKG_DEPENDS=/s/, util-linux//" packages/termux-tools/build.sh
+          sed -i "/PACKAGES+=(\"util-linux\")/d" scripts/build-bootstraps.sh
+          sed -i -E "/PACKAGES\\+=\\(\"(ed|debianutils|dos2unix|inetutils|lsof|nano|net-tools|patch|unzip)\"\\)/d" scripts/build-bootstraps.sh
+          set +e
+          ./scripts/run-docker.sh ./scripts/build-bootstraps.sh --android10 --architectures aarch64 --add ramz 2>&1 | tee ../bootstrap-build.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then tail -n 180 ../bootstrap-build.log; exit "$status"; fi
+          test -s bootstrap-aarch64.zip
+          unzip -l bootstrap-aarch64.zip | grep -E "[[:space:]]bin/ramz$"
+          unzip -l bootstrap-aarch64.zip | grep -E "[[:space:]]lib/libramz[.]so$"
+          cp bootstrap-aarch64.zip ../app/src/main/cpp/bootstrap-aarch64.zip
+          sha256sum ../app/src/main/cpp/bootstrap-aarch64.zip > ../bootstrap-aarch64.zip.sha256
+      - name: Validate bootstrap ARM64
+        run: |
+          unzip -p app/src/main/cpp/bootstrap-aarch64.zip bin/ramz > ramz
+          unzip -p app/src/main/cpp/bootstrap-aarch64.zip lib/libramz.so > libramz.so
+          file ramz libramz.so | grep -E "ARM aarch64|ARM64"
+      - name: Build and validate APK
+        run: |
+          set -euxo pipefail
+          export TERMUX_ZRAM_BOOTSTRAP_AARCH64_SHA256="$(sha256sum app/src/main/cpp/bootstrap-aarch64.zip | sed "s/ .*//")"
+          export TERMUX_APP_VERSION_NAME=0.118.0-zram.1
+          export TERMUX_APK_VERSION_TAG="termux-zram-${GITHUB_SHA}"
+          export TERMUX_SPLIT_APKS_FOR_DEBUG_BUILDS=1
+          ./gradlew --no-daemon assembleDebug
+          APK="$(find app/build/outputs/apk/debug -name "*arm64-v8a.apk" -print -quit)"
+          test -n "$APK"
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/aapt" dump badging "$APK" | grep "com.termuxzram"
+          unzip -l "$APK" | grep -E "lib/arm64-v8a/libtermux-bootstrap[.]so$"
+          cp "$APK" Termux-ZRAM-arm64-v8a-debug.apk
+          sha256sum Termux-ZRAM-arm64-v8a-debug.apk > Termux-ZRAM-arm64-v8a-debug.apk.sha256
+      - name: Publish verified APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: Termux-ZRAM-arm64-v8a
+          path: |
+            Termux-ZRAM-arm64-v8a-debug.apk
+            Termux-ZRAM-arm64-v8a-debug.apk.sha256
+            app/src/main/cpp/bootstrap-aarch64.zip
+            bootstrap-aarch64.zip.sha256
+          if-no-files-found: error
+      - name: Preserve bootstrap diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: Termux-ZRAM-bootstrap-build-log
+          path: bootstrap-build.log
+          if-no-files-found: warn
