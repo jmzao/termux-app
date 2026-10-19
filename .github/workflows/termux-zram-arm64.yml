@@ -50,7 +50,9 @@ jobs:
           cd termux-packages-build
           ./scripts/run-docker.sh ./clean.sh
           sed -i "s/PACKAGES+=(\"bzip2\")/PACKAGES+=(\"libbz2\")/" scripts/build-bootstraps.sh
+          sed -i "/PACKAGES+=(\"lsof\")/d" scripts/build-bootstraps.sh
           grep -F "PACKAGES+=(\"libbz2\")" scripts/build-bootstraps.sh
+          ! grep -F "PACKAGES+=(\"lsof\")" scripts/build-bootstraps.sh
           ./scripts/run-docker.sh ./scripts/build-bootstraps.sh --android10 --architectures aarch64 --add ramz 2>&1 | tee ../bootstrap-build.log
           test -s bootstrap-aarch64.zip
           unzip -l bootstrap-aarch64.zip | grep -E "[[:space:]]bin/ramz$"
